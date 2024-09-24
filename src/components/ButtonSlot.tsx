@@ -19,8 +19,6 @@ import Animated, {
   withSpring,
   interpolateColor,
   interpolate,
-  runOnJS,
-  runOnUI,
 } from "react-native-reanimated";
 import {
   Gesture,
@@ -64,7 +62,9 @@ interface NumberSlotProps {
   onUpdate?: (args: InjectionContext) => void;
   onStart?: (args: InjectionContext) => void;
   onBegin?: (args: InjectionContext) => void;
-  onHover?: (args: InjectionContext) => void;
+  onHoverIn?: (args: InjectionContext) => void;
+  onHoverOut?: (args: InjectionContext) => void;
+  onEnd?: (args: InjectionContext) => void;
 }
 
 const ButtonSlot = React.forwardRef(
@@ -77,7 +77,9 @@ const ButtonSlot = React.forwardRef(
       onStart,
       onBegin,
       hoveredIndex,
-      onHover,
+      onHoverIn,
+      onHoverOut,
+      onEnd,
       buttons,
     } = props;
     const [active, setActive] = useState<boolean>(false);
@@ -85,6 +87,15 @@ const ButtonSlot = React.forwardRef(
       x: 0,
       y: 0,
     });
+
+    // function clamp(val, min, max) {
+    //   return Math.min(Math.max(val, min), max);
+    // }
+
+    const { width, height } = Dimensions.get("screen");
+
+    //Offset between where drag begins and the center of the element
+
     const offsetX: SharedValue<number> = useSharedValue(0);
     const offsetY: SharedValue<number> = useSharedValue(0);
     const translationX: SharedValue<number> = useSharedValue(0);
@@ -100,10 +111,31 @@ const ButtonSlot = React.forwardRef(
       setActive,
     };
 
-    function someWorklet(greeting) {
-      "worklet";
-      console.log(greeting, "From the UI thread");
-    }
+    const hover = Gesture.Hover()
+      .runOnJS(true)
+      .onStart(
+        (event: GestureHandlerEvent<HoverGestureHandlerEventPayload>) => {
+          if (onHoverIn) {
+            onHoverIn({
+              event,
+              ...props,
+              ...common,
+            });
+          }
+        }
+      )
+      .onEnd(
+        (event: GestureStateChangeEvent<HoverGestureHandlerEventPayload>) => {
+          if (onHoverOut) {
+            onHoverOut({
+              event,
+              ...props,
+              ...common,
+            });
+          }
+        }
+      );
+
     const pan = Gesture.Pan()
       .runOnJS(true)
       .minDistance(1)
@@ -121,32 +153,106 @@ const ButtonSlot = React.forwardRef(
       )
       .onStart((event: GestureHandlerEvent<PanGestureHandlerEventPayload>) => {
         // caluclate offset between where touch picks up element and its center
-        if (onStart) {
-          console.log("starting drag");
-          // onStart("hello");
-          runOnUI(someWorklet)("Howdy");
-          // onStart({ ...props });
-        }
-        // onStart &&
-        //   onStart({
-        //     event,
-        //     ...props,
-        //     ...common,
-        //   });
+        onStart &&
+          onStart({
+            event,
+            ...props,
+            ...common,
+          });
+      })
+      .onUpdate((event) => {
+        const { absoluteX, absoluteY } = event;
+        onUpdate &&
+          onUpdate({
+            event,
+            ...props,
+            ...common,
+          });
+
+        try {
+          buttons.forEach((ref, index) => {
+            ref.current?.measure((fx, fy, width, height, px, py) => {
+              if (
+                overlapping({
+                  x: px,
+                  y: py,
+                  width,
+                  height,
+                  mx: absoluteX,
+                  my: absoluteY,
+                }) &&
+                index !== hoveredIndex.value
+              ) {
+                onHoverIn &&
+                  onHoverIn({
+                    event,
+                    ...props,
+                    ...common,
+                  });
+                hoveredIndex.value = index;
+              }
+            });
+          });
+        } catch (err) {}
+
+        // onUpdate(absoluteX - offsetX.value, absoluteY - offsetY.value);
+
+        // targets[0].x.value = absoluteX - offsetX.value;
+        // targets[0].y.value = absoluteY - offsetY.value;
+        // translationX.value = event.translationX;
+        // translationY.value = event.translationY;
+      })
+      .onEnd((event) => {
+        //snap back animated line
+        translationX.value = withSpring(0);
+        translationY.value = withSpring(0);
+        targets[0].x.value = withSpring(origin.x);
+        targets[0].y.value = withSpring(origin.y);
+        onEnd &&
+          onEnd({
+            event,
+            ...props,
+            ...common,
+          });
       });
 
+    useEffect(() => {
+      ref.current.measure((fx, fy, width, height, px, py) => {
+        setOrigin({ x: px + width / 2, y: py + height / 2 });
+      });
+    }, [width, height]);
+
+    const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+    // const animatedStyles = useAnimatedStyle(() => ({
+    //   transform: [
+    //     { translateX: translationX.value },
+    //     { translateY: translationY.value },
+    //   ],
+    // }));
+
+    const interp = new Array(buttons.length)
+      .fill("")
+      .map((v, i) => (i == index ? 1 : 0));
+
+    const animatedButtonStyles = useAnimatedStyle(() => ({
+      borderColor: hoveredIndex.value === index ? "blue" : "red",
+      borderWidth: hoveredIndex.value === index ? 2 : 0,
+      borderStyle: "solid",
+    }));
+
+    const composed = Gesture.Simultaneous(pan, hover);
+
     return (
-      <GestureDetector gesture={pan}>
+      <GestureDetector gesture={composed}>
+        {/* <Animated.View ref={ref} style={[animatedStyles]}> */}
         <Animated.View ref={ref}>
-          <Pressable
-            onPress={() => {
-              console.log("pressing", index);
-            }}
-            // style={[animatedButtonStyles]}
+          <AnimatedPressable
+            style={[animatedButtonStyles]}
             className={"bg-sky-700 px-5 py-2 rounded"}
           >
             <Text className="text-cyan-200">{label}</Text>
-          </Pressable>
+          </AnimatedPressable>
         </Animated.View>
       </GestureDetector>
     );

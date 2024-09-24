@@ -47,10 +47,12 @@ type InjectionContext = {
   origin: { x: number; y: number };
   offsetX: SharedValue<number>;
   offsetY: SharedValue<number>;
+  activePath: SharedValue<string>;
   translationX: SharedValue<number>;
   translationY: SharedValue<number>;
   active: boolean;
   setActive: Dispatch<SetStateAction<boolean>>;
+  // elementPath: string;
 } & NumberSlotProps;
 
 interface NumberSlotProps {
@@ -59,12 +61,14 @@ interface NumberSlotProps {
   label: string;
   hoveredIndex: SharedValue<number>;
   buttons: any[];
+  elementPath: string;
   onUpdate?: (args: InjectionContext) => void;
   onStart?: (args: InjectionContext) => void;
   onBegin?: (args: InjectionContext) => void;
   onHoverIn?: (args: InjectionContext) => void;
   onHoverOut?: (args: InjectionContext) => void;
   onEnd?: (args: InjectionContext) => void;
+  activePath: SharedValue<string>;
 }
 
 const NumberSlot = React.forwardRef(
@@ -81,6 +85,8 @@ const NumberSlot = React.forwardRef(
       onHoverOut,
       onEnd,
       buttons,
+      activePath,
+      elementPath,
     } = props;
     const [active, setActive] = useState<boolean>(false);
     const [origin, setOrigin] = useState<{ x: number; y: number }>({
@@ -109,6 +115,8 @@ const NumberSlot = React.forwardRef(
       translationY,
       active,
       setActive,
+      elementPath,
+      activePath,
     };
 
     const hover = Gesture.Hover()
@@ -188,12 +196,15 @@ const NumberSlot = React.forwardRef(
                     event,
                     ...props,
                     ...common,
+                    index,
                   });
                 hoveredIndex.value = index;
               }
             });
           });
-        } catch (err) {}
+        } catch (err) {
+          console.log(err);
+        }
 
         // onUpdate(absoluteX - offsetX.value, absoluteY - offsetY.value);
 
@@ -231,14 +242,11 @@ const NumberSlot = React.forwardRef(
     //   ],
     // }));
 
-    const interp = new Array(buttons.length)
-      .fill("")
-      .map((v, i) => (i == index ? 1 : 0));
-
     const animatedButtonStyles = useAnimatedStyle(() => ({
-      borderColor: hoveredIndex.value === index ? "blue" : "red",
-      borderWidth: hoveredIndex.value === index ? 2 : 0,
+      borderColor: hoveredIndex.value === index ? "red" : "rgb(3 105 161)",
+      borderWidth: 2,
       borderStyle: "solid",
+      opacity: activePath.value === elementPath ? 1 : 1,
     }));
 
     const composed = Gesture.Simultaneous(pan, hover);
@@ -249,7 +257,7 @@ const NumberSlot = React.forwardRef(
         <Animated.View ref={ref}>
           <AnimatedPressable
             style={[animatedButtonStyles]}
-            className={"bg-sky-700 px-5 py-2 rounded"}
+            className={"bg-sky-700 px-5 py-2 rounded box-border"}
           >
             <Text className="text-cyan-200">{label}</Text>
           </AnimatedPressable>
