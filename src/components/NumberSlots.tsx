@@ -52,7 +52,7 @@ type InjectionContext = {
   translationY: SharedValue<number>;
   active: boolean;
   setActive: Dispatch<SetStateAction<boolean>>;
-  // elementPath: string;
+  elementPath: string;
 } & NumberSlotProps;
 
 interface NumberSlotProps {
@@ -202,9 +202,7 @@ const NumberSlot = React.forwardRef(
               }
             });
           });
-        } catch (err) {
-          console.log(err);
-        }
+        } catch (err) {}
 
         // onUpdate(absoluteX - offsetX.value, absoluteY - offsetY.value);
 
@@ -243,10 +241,10 @@ const NumberSlot = React.forwardRef(
     // }));
 
     const animatedButtonStyles = useAnimatedStyle(() => ({
-      borderColor: hoveredIndex.value === index ? "red" : "rgb(3 105 161)",
+      borderColor: hoveredIndex.value === index ? "blue" : "rgb(3 105 161)",
       borderWidth: 2,
       borderStyle: "solid",
-      opacity: activePath.value === elementPath ? 1 : 1,
+      opacity: activePath.value === elementPath ? 1 : 0.5,
     }));
 
     const composed = Gesture.Simultaneous(pan, hover);
