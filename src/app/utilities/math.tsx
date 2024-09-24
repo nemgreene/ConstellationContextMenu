@@ -16,5 +16,5 @@ export const overlapping = ({
   mx,
   my,
 }: OverlappingProps): boolean => {
-  return mx >= x && mx <= x + width && my >= y && mx <= y + height;
+  return mx >= x && mx <= x + width && my >= y && my <= y + height;
 };

@@ -198,7 +198,7 @@ const NumberSlot = React.forwardRef(
                     ...common,
                     index,
                   });
-                hoveredIndex.value = index;
+                // hoveredIndex.value = index;
               }
             });
           });
@@ -241,7 +241,7 @@ const NumberSlot = React.forwardRef(
     // }));
 
     const animatedButtonStyles = useAnimatedStyle(() => ({
-      borderColor: hoveredIndex.value === index ? "blue" : "rgb(3 105 161)",
+      borderColor: hoveredIndex.value === index ? "red" : "rgb(3 105 161)",
       borderWidth: 2,
       borderStyle: "solid",
       opacity: activePath.value === elementPath ? 1 : 0.5,

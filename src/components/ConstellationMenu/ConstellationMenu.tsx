@@ -20,7 +20,7 @@ import {
 } from "react-native-gesture-handler";
 import { StyleSheet, Dimensions } from "react-native";
 import Svg, { Line, Circle } from "react-native-svg";
-import NumberSlot from "@/components/NumberSlots";
+import NumberSlot from "@/components/ConstellationMenu/NumberSlots";
 import {
   AnimatedInput,
   AnimatedLine,
@@ -141,6 +141,7 @@ export default function ConstellationMenu() {
                 hoveredIndex={hoveredIndex}
                 label={v.label && v.label.toString()}
                 onHoverIn={({ event, index }) => {
+                  hoveredIndex.value = index;
                   activePath.value = buttons[index].path;
                 }}
                 onHoverOut={(args) => {
