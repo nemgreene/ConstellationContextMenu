@@ -38,7 +38,7 @@ import {
   HoverGestureChangeEventPayload,
   HoverGestureHandlerEventPayload,
 } from "react-native-gesture-handler/lib/typescript/handlers/gestures/hoverGesture";
-import { orign, overlapping } from "@/app/utilities/math";
+import { origin, overlapping } from "@/app/utilities/math";
 import { adaptViewConfig } from "react-native-reanimated/lib/typescript/ConfigHelper";
 
 type InjectionContext = {
@@ -46,12 +46,7 @@ type InjectionContext = {
     | GestureStateChangeEvent<PanGestureHandlerEventPayload>
     | GestureHandlerEvent<PanGestureHandlerEventPayload>
     | GestureHandlerEvent<HoverGestureHandlerEventPayload>;
-  // origin: { x: number; y: number };
-  offsetX: SharedValue<number>;
-  offsetY: SharedValue<number>;
   activePath: SharedValue<string>;
-  translationX: SharedValue<number>;
-  translationY: SharedValue<number>;
   active: boolean;
   setActive: Dispatch<SetStateAction<boolean>>;
   elementPath: string;
@@ -98,31 +93,19 @@ const NumberSlot = React.forwardRef(
     } = props;
     const [active, setActive] = useState<boolean>(false);
 
-    // function clamp(val, min, max) {
-    //   return Math.min(Math.max(val, min), max);
-    // }
-
-    const { width, height } = Dimensions.get("screen");
+    const { top, left, height, width } = buttons[index];
 
     //Offset between where drag begins and the center of the element
 
-    const offsetX: SharedValue<number> = useSharedValue(0);
-    const offsetY: SharedValue<number> = useSharedValue(0);
-    const translationX: SharedValue<number> = useSharedValue(0);
-    const translationY: SharedValue<number> = useSharedValue(0);
-    const originX: SharedValue<number> = useSharedValue(0);
-    const originY: SharedValue<number> = useSharedValue(0);
-    const found = useSharedValue(0);
-
     const common = {
-      offsetX,
-      offsetY,
-      translationX,
-      translationY,
       active,
       setActive,
       elementPath,
       activePath,
+      top,
+      left,
+      height,
+      width,
     };
 
     const hover = Gesture.Hover()
@@ -155,8 +138,14 @@ const NumberSlot = React.forwardRef(
       .minDistance(1)
       .onBegin(
         (event: GestureStateChangeEvent<PanGestureHandlerEventPayload>) => {
-          connections[0].x1.value = originX.value;
-          connections[0].y1.value = originY.value;
+          const { x, y } = origin(
+            top.value,
+            left.value,
+            height.value,
+            width.value
+          );
+          connections[0].x1.value = x;
+          connections[0].y1.value = y;
           connections[0].x2.value = event.absoluteX;
           connections[0].y2.value = event.absoluteY;
           onBegin &&
@@ -187,38 +176,42 @@ const NumberSlot = React.forwardRef(
             ...props,
             ...common,
           });
-        buttons.forEach((ref, index) => {
-          ref.current?.measure((x, y, width, height, pageX, pageY) => {
+        try {
+          buttons.forEach((button, index) => {
+            const { top, left, height, width } = button;
             if (
               overlapping({
-                x: pageX,
-                y: pageY,
-                width,
-                height,
-                mx: absoluteX,
-                my: absoluteY,
+                top: top.value,
+                left: left.value,
+                width: width.value,
+                height: height.value,
+                mouseX: absoluteX,
+                mouseY: absoluteY,
               })
             ) {
-              found.value = index + 1;
+              throw index;
             }
           });
-
-          if (found.value) {
-            onHoverIn &&
-              onHoverIn({
-                event,
-                ...props,
-                ...common,
-                index: found.value - 1,
-              });
-            return;
-          }
           hoveredIndex.value = -1;
-        });
+        } catch (index) {
+          onHoverIn &&
+            onHoverIn({
+              event,
+              ...props,
+              ...common,
+              index,
+            });
+          return;
+        }
       })
       .onEnd((event) => {
         //snap back animated line
-        const [x, y] = [originX.value, originY.value];
+        const { x, y } = origin(
+          top.value,
+          left.value,
+          height.value,
+          width.value
+        );
         const [cx, cy] = [connections[0].x2.value, connections[0].y2.value];
 
         connections[0].x2.value = withClamp(
@@ -257,10 +250,14 @@ const NumberSlot = React.forwardRef(
           className="GestureDetector"
           style={{ alignItems: "center" }}
           onLayout={() => {
-            ref.current?.measure((x, y, width, height, pageX, pageY) => {
-              originX.value = pageX + width / 2;
-              originY.value = pageY + height / 2;
-            });
+            ref.current?.measure(
+              (x, y, elemWidth, elemHeight, pageX, pageY) => {
+                top.value = pageY;
+                left.value = pageX;
+                width.value = elemWidth;
+                height.value = elemHeight;
+              }
+            );
           }}
         >
           <AnimatedPressable

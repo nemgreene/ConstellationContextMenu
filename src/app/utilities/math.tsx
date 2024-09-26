@@ -1,31 +1,41 @@
 import { RefObject } from "react";
 
 interface OverlappingProps {
-  x: number;
-  y: number;
+  top: number;
+  left: number;
   width: number;
   height: number;
-  mx: number;
-  my: number;
+  mouseX: number;
+  mouseY: number;
 }
 //check if absolute mouse position is overlapping with an element
 
+function clamp(val, min, max) {
+  return Math.min(Math.max(val, min), max);
+}
+
 export const overlapping = ({
-  x,
-  y,
+  top,
+  left,
   width,
   height,
-  mx,
-  my,
+  mouseX,
+  mouseY,
 }: OverlappingProps): boolean => {
-  return mx >= x && mx <= x + width && my >= y && my <= y + height;
+  return (
+    mouseX >= left &&
+    mouseX <= left + width &&
+    mouseY >= top &&
+    mouseY <= top + height
+  );
 };
 
-export const orign = (ref: RefObject<any>): { x: number; y: number } => {
-  if (!ref.current.getBoundingClientRect) {
-    return { x: 0, y: 0 };
-  }
-  const { width, height, top, left } = ref.current.getBoundingClientRect();
+export const origin = (
+  top: number,
+  left: number,
+  height: number,
+  width: number
+): { x: number; y: number } => {
   return { x: left + width / 2, y: top + height / 2 };
 };
 

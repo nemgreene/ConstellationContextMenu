@@ -27,11 +27,12 @@ import {
   AnimatedText,
 } from "@/components/AnimatedComponents";
 import ConnectionHandler from "./ConnectionHandler";
-import { ObjectFlatten, orign } from "@/app/utilities/math";
+import { ObjectFlatten, origin } from "@/app/utilities/math";
 
 interface CommonButtonProps {
   label: string;
   onClick?: () => void;
+  pin?: boolean;
 }
 
 interface ConstellationButton extends CommonButtonProps {
@@ -42,6 +43,11 @@ interface FlattenedButton extends CommonButtonProps {
   buttons?: any[];
   path: string;
   index: number;
+  top: SharedValue<number>;
+  left: SharedValue<number>;
+  height: SharedValue<number>;
+  width: SharedValue<number>;
+  ref: RefObject<any>;
 }
 
 const schema: ConstellationButton[] = [
@@ -54,22 +60,29 @@ const schema: ConstellationButton[] = [
       { label: "ChildButton3" },
     ],
   },
-  { label: "Button2" },
+  { label: "Button2 (Pin)", pin: true },
   { label: "Button3" },
 ];
 
 export default function ConstellationMenu() {
-  const [buttons, setButtons] = useState<FlattenedButton[]>(
-    ObjectFlatten(schema)
-  );
   const [commandChain, setCommandChain] = useState("");
+  const [buttons, setButtons] = useState<FlattenedButton[]>(
+    ObjectFlatten(schema).map((v) => ({
+      ...v,
+      top: useSharedValue(0),
+      left: useSharedValue(0),
+      height: useSharedValue(0),
+      width: useSharedValue(0),
+      ref: React.createRef(),
+    }))
+  );
 
   const maxNesting =
     buttons.map((v) => v.path.split(">").length).sort((a, b) => b - a)[0] || 1;
 
   //inverted chain of connections to draw
-  //connection 0 is always bound to mouse
-  //connection 1 bound to most recent chaining
+  //connection 0(x1, y1) is always bound to mouse
+  //connection 0(x2, y2) bound to most recent chaining
   //all further connections are synamic
   const connections: {
     x1: SharedValue<number>;
@@ -85,15 +98,9 @@ export default function ConstellationMenu() {
     y2: useSharedValue(0),
   }));
 
-  console.log(buttons);
-
-  const refs: any[] = React.useMemo(
-    () => Object.keys(buttons).map((item) => ({ ref: React.createRef() })),
-    []
-  );
-  const dictLookup = buttons
-    .map((v, i) => ({ ...v, ref: refs[i] }))
-    .reduce((acc, curr) => ({ ...acc, [curr.path]: curr }), {});
+  // const dictLookup = buttons
+  //   .map((v, i) => ({ ...v, ref: refs[i] }))
+  //   .reduce((acc, curr) => ({ ...acc, [curr.path]: curr }), {});
 
   const activePath: SharedValue<string> = useSharedValue("");
   const hoveredIndex: SharedValue<number> = useSharedValue(
@@ -101,9 +108,25 @@ export default function ConstellationMenu() {
   );
 
   const onHoverIn = (args) => {
-    const { index } = args;
+    const { index, event } = args;
+    const target = buttons[index];
     hoveredIndex.value = index;
-    activePath.value = buttons[index].path + `>${buttons[index].label}`;
+    activePath.value = target.path + `>${target.label}`;
+
+    if (target.buttons || target.pin) {
+      // if (dictLookup[target.path]?.ref?.current) {
+      //   const targetOriginX = useSharedValue(0);
+      //   const targetOriginY = useSharedValue(0);
+      //   // dictLookup[target.path]?.ref?.current.measure((x, y, width, height, pageX, pageY) => {
+      //   //   targetOriginX =
+      //   // });
+      // }
+      // const {x, y} = orign()
+      // connections[0].x1.value = originX.value;
+      // connections[0].y1.value = originY.value;
+      // connections[0].x2.value = event.absoluteX;
+      // connections[0].y2.value = event.absoluteY;
+    }
   };
 
   return (
@@ -120,11 +143,11 @@ export default function ConstellationMenu() {
         <View className=" flex flex-row gap-2 flex-wrap w-1/2 items-center justify-center">
           {buttons.map((v, i, a) => (
             <NumberSlot
-              buttons={refs}
+              buttons={buttons}
               connections={connections}
               index={i}
               key={i}
-              ref={refs[i]}
+              ref={v.ref}
               activePath={activePath}
               elementPath={v.path}
               hoveredIndex={hoveredIndex}
@@ -134,9 +157,7 @@ export default function ConstellationMenu() {
                 hoveredIndex.value = -1;
               }}
               onStart={(args) => {}}
-              onUpdate={({ event }) => {
-                console.log(activePath.value);
-              }}
+              onUpdate={({ event }) => {}}
               onEnd={({ event, index }) => {
                 if (hoveredIndex.value !== -1) {
                   setCommandChain(
