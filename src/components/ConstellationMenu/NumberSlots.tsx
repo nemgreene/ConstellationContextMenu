@@ -19,6 +19,7 @@ import Animated, {
   withSpring,
   interpolateColor,
   interpolate,
+  withClamp,
 } from "react-native-reanimated";
 import {
   Gesture,
@@ -37,14 +38,15 @@ import {
   HoverGestureChangeEventPayload,
   HoverGestureHandlerEventPayload,
 } from "react-native-gesture-handler/lib/typescript/handlers/gestures/hoverGesture";
-import { overlapping } from "@/app/utilities/math";
+import { orign, overlapping } from "@/app/utilities/math";
+import { adaptViewConfig } from "react-native-reanimated/lib/typescript/ConfigHelper";
 
 type InjectionContext = {
   event:
     | GestureStateChangeEvent<PanGestureHandlerEventPayload>
     | GestureHandlerEvent<PanGestureHandlerEventPayload>
     | GestureHandlerEvent<HoverGestureHandlerEventPayload>;
-  origin: { x: number; y: number };
+  // origin: { x: number; y: number };
   offsetX: SharedValue<number>;
   offsetY: SharedValue<number>;
   activePath: SharedValue<string>;
@@ -57,7 +59,13 @@ type InjectionContext = {
 
 interface NumberSlotProps {
   index: number;
-  targets: { x: SharedValue<number>; y: SharedValue<number> }[];
+  connections: {
+    x1: SharedValue<number>;
+    y1: SharedValue<number>;
+    x2: SharedValue<number>;
+    y2: SharedValue<number>;
+    index: number;
+  }[];
   label: string;
   hoveredIndex: SharedValue<number>;
   buttons: any[];
@@ -75,7 +83,7 @@ const NumberSlot = React.forwardRef(
   (props: NumberSlotProps, ref: RefObject<any>) => {
     const {
       index,
-      targets,
+      connections,
       onUpdate,
       label,
       onStart,
@@ -89,10 +97,6 @@ const NumberSlot = React.forwardRef(
       elementPath,
     } = props;
     const [active, setActive] = useState<boolean>(false);
-    const [origin, setOrigin] = useState<{ x: number; y: number }>({
-      x: 0,
-      y: 0,
-    });
 
     // function clamp(val, min, max) {
     //   return Math.min(Math.max(val, min), max);
@@ -106,9 +110,11 @@ const NumberSlot = React.forwardRef(
     const offsetY: SharedValue<number> = useSharedValue(0);
     const translationX: SharedValue<number> = useSharedValue(0);
     const translationY: SharedValue<number> = useSharedValue(0);
+    const originX: SharedValue<number> = useSharedValue(0);
+    const originY: SharedValue<number> = useSharedValue(0);
+    const found = useSharedValue(0);
 
     const common = {
-      origin,
       offsetX,
       offsetY,
       translationX,
@@ -149,8 +155,10 @@ const NumberSlot = React.forwardRef(
       .minDistance(1)
       .onBegin(
         (event: GestureStateChangeEvent<PanGestureHandlerEventPayload>) => {
-          offsetX.value = event.absoluteX - origin.x;
-          offsetY.value = event.absoluteY - origin.y;
+          connections[0].x1.value = originX.value;
+          connections[0].y1.value = originY.value;
+          connections[0].x2.value = event.absoluteX;
+          connections[0].y2.value = event.absoluteY;
           onBegin &&
             onBegin({
               event,
@@ -169,54 +177,59 @@ const NumberSlot = React.forwardRef(
           });
       })
       .onUpdate((event) => {
-        const { absoluteX, absoluteY } = event;
+        const { velocityX, velocityY, absoluteX, absoluteY } = event;
+        //orchestrate line drag
+        connections[0].x2.value = absoluteX;
+        connections[0].y2.value = absoluteY;
         onUpdate &&
           onUpdate({
             event,
             ...props,
             ...common,
           });
-
-        try {
-          buttons.forEach((ref, index) => {
-            ref.current?.measure((fx, fy, width, height, px, py) => {
-              if (
-                overlapping({
-                  x: px,
-                  y: py,
-                  width,
-                  height,
-                  mx: absoluteX,
-                  my: absoluteY,
-                }) &&
-                index !== hoveredIndex.value
-              ) {
-                onHoverIn &&
-                  onHoverIn({
-                    event,
-                    ...props,
-                    ...common,
-                    index,
-                  });
-                // hoveredIndex.value = index;
-              }
-            });
+        buttons.forEach((ref, index) => {
+          ref.current?.measure((x, y, width, height, pageX, pageY) => {
+            if (
+              overlapping({
+                x: pageX,
+                y: pageY,
+                width,
+                height,
+                mx: absoluteX,
+                my: absoluteY,
+              })
+            ) {
+              found.value = index + 1;
+            }
           });
-        } catch (err) {}
 
-        // onUpdate(absoluteX - offsetX.value, absoluteY - offsetY.value);
-
-        // targets[0].x.value = absoluteX - offsetX.value;
-        // targets[0].y.value = absoluteY - offsetY.value;
-        // translationX.value = event.translationX;
-        // translationY.value = event.translationY;
+          if (found.value) {
+            onHoverIn &&
+              onHoverIn({
+                event,
+                ...props,
+                ...common,
+                index: found.value - 1,
+              });
+            return;
+          }
+          hoveredIndex.value = -1;
+        });
       })
       .onEnd((event) => {
         //snap back animated line
-        translationX.value = withSpring(0);
-        translationY.value = withSpring(0);
-        targets[0].x.value = withSpring(origin.x);
-        targets[0].y.value = withSpring(origin.y);
+        const [x, y] = [originX.value, originY.value];
+        const [cx, cy] = [connections[0].x2.value, connections[0].y2.value];
+
+        connections[0].x2.value = withClamp(
+          { min: Math.min(cx, x), max: Math.max(cx, x) },
+          withSpring(x)
+        );
+        connections[0].y2.value = withClamp(
+          { min: Math.min(cy, y), max: Math.max(cy, y) },
+          withSpring(y)
+        );
+        activePath.value = "";
         onEnd &&
           onEnd({
             event,
@@ -225,26 +238,13 @@ const NumberSlot = React.forwardRef(
           });
       });
 
-    useEffect(() => {
-      ref.current.measure((fx, fy, width, height, px, py) => {
-        setOrigin({ x: px + width / 2, y: py + height / 2 });
-      });
-    }, [width, height]);
-
     const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
-
-    // const animatedStyles = useAnimatedStyle(() => ({
-    //   transform: [
-    //     { translateX: translationX.value },
-    //     { translateY: translationY.value },
-    //   ],
-    // }));
 
     const animatedButtonStyles = useAnimatedStyle(() => ({
       borderColor: hoveredIndex.value === index ? "red" : "rgb(3 105 161)",
       borderWidth: 2,
       borderStyle: "solid",
-      opacity: activePath.value === elementPath ? 1 : 0.5,
+      opacity: activePath.value.includes(elementPath) ? 1 : 0.5,
     }));
 
     const composed = Gesture.Simultaneous(pan, hover);
@@ -252,7 +252,17 @@ const NumberSlot = React.forwardRef(
     return (
       <GestureDetector gesture={composed}>
         {/* <Animated.View ref={ref} style={[animatedStyles]}> */}
-        <Animated.View ref={ref}>
+        <Animated.View
+          ref={ref}
+          className="GestureDetector"
+          style={{ alignItems: "center" }}
+          onLayout={() => {
+            ref.current?.measure((x, y, width, height, pageX, pageY) => {
+              originX.value = pageX + width / 2;
+              originY.value = pageY + height / 2;
+            });
+          }}
+        >
           <AnimatedPressable
             style={[animatedButtonStyles]}
             className={"bg-sky-700 px-5 py-2 rounded box-border"}
