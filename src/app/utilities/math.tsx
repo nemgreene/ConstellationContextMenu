@@ -1,4 +1,6 @@
+import { ConnectionInterface } from "@/components/ConstellationMenu/types";
 import { RefObject } from "react";
+import { SharedValue } from "react-native-reanimated";
 
 interface OverlappingProps {
   top: number;
@@ -31,12 +33,12 @@ export const overlapping = ({
 };
 
 export const origin = (
-  top: number,
-  left: number,
-  height: number,
-  width: number
+  top: SharedValue<number>,
+  left: SharedValue<number>,
+  height: SharedValue<number>,
+  width: SharedValue<number>
 ): { x: number; y: number } => {
-  return { x: left + width / 2, y: top + height / 2 };
+  return { x: left.value + width.value / 2, y: top.value + height.value / 2 };
 };
 
 export const ObjectFlatten = (obj, path = "root") => {

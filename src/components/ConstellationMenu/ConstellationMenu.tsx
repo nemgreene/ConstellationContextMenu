@@ -1,6 +1,14 @@
 import { Link } from "expo-router";
-import React, { RefObject, useEffect, useRef, useState } from "react";
-import { Button, Text, View } from "react-native";
+import React, {
+  Dispatch,
+  PropsWithChildren,
+  RefObject,
+  SetStateAction,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import { Button, Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import StyledButton from "@/styled/StyledButton";
 import Animated, {
@@ -10,24 +18,32 @@ import Animated, {
   useAnimatedProps,
   withTiming,
   withSpring,
-  useAnimatedReaction,
-  runOnJS,
+  interpolateColor,
+  interpolate,
+  withClamp,
 } from "react-native-reanimated";
 import {
   Gesture,
   GestureDetector,
+  GestureEvent,
   GestureHandlerRootView,
+  GestureStateChangeEvent,
+  PanGestureHandlerEventPayload,
+  PanGestureHandlerGestureEvent,
 } from "react-native-gesture-handler";
 import { StyleSheet, Dimensions } from "react-native";
 import Svg, { Line, Circle } from "react-native-svg";
-import NumberSlot from "@/components/ConstellationMenu/NumberSlots";
+import { GestureHandlerEvent } from "react-native-reanimated/lib/typescript/reanimated2/hook";
+import { PanGestureType } from "react-native-gesture-handler/lib/typescript/handlers/gestures/panGesture";
 import {
-  AnimatedInput,
-  AnimatedLine,
-  AnimatedText,
-} from "@/components/AnimatedComponents";
+  HoverGestureChangeEventPayload,
+  HoverGestureHandlerEventPayload,
+} from "react-native-gesture-handler/lib/typescript/handlers/gestures/hoverGesture";
+import { ObjectFlatten, origin, overlapping } from "@/app/utilities/math";
+import { adaptViewConfig } from "react-native-reanimated/lib/typescript/ConfigHelper";
+import { ConnectionInterface } from "./types";
 import ConnectionHandler from "./ConnectionHandler";
-import { ObjectFlatten, origin } from "@/app/utilities/math";
+import NumberSlot from "./NumberSlots";
 
 interface CommonButtonProps {
   label: string;
@@ -64,7 +80,7 @@ const schema: ConstellationButton[] = [
   { label: "Button3" },
 ];
 
-export default function ConstellationMenu() {
+export default function ConstellationMenu({ children }: PropsWithChildren) {
   const [commandChain, setCommandChain] = useState("");
   const [buttons, setButtons] = useState<FlattenedButton[]>(
     ObjectFlatten(schema).map((v) => ({
@@ -78,25 +94,20 @@ export default function ConstellationMenu() {
   );
 
   const maxNesting =
-    buttons.map((v) => v.path.split(">").length).sort((a, b) => b - a)[0] || 1;
+    buttons.map((v) => v.path.split(">").length).sort((a, b) => b - a)[0] + 1 ||
+    1;
 
   //inverted chain of connections to draw
   //connection 0(x1, y1) is always bound to mouse
   //connection 0(x2, y2) bound to most recent chaining
   //all further connections are synamic
-  const connections: {
-    x1: SharedValue<number>;
-    y1: SharedValue<number>;
-    x2: SharedValue<number>;
-    y2: SharedValue<number>;
-    index: number;
-  }[] = new Array(maxNesting).fill("").map((v, i) => ({
-    index: i,
-    x1: useSharedValue(0),
-    x2: useSharedValue(0),
-    y1: useSharedValue(0),
-    y2: useSharedValue(0),
-  }));
+  const connections: ConnectionInterface[] = new Array(maxNesting)
+    .fill("")
+    .map((v, i) => ({
+      index: i,
+      x1: useSharedValue(0),
+      y1: useSharedValue(0),
+    }));
 
   // const dictLookup = buttons
   //   .map((v, i) => ({ ...v, ref: refs[i] }))
@@ -107,27 +118,134 @@ export default function ConstellationMenu() {
     Object.keys(buttons).length + 1
   );
 
-  const onHoverIn = (args) => {
-    const { index, event } = args;
-    const target = buttons[index];
-    hoveredIndex.value = index;
-    activePath.value = target.path + `>${target.label}`;
+  // const filteredPath = (path: SharedValue<number> | string) => {
+  //   const ret = typeof path === "object" ? path.value : path
 
-    if (target.buttons || target.pin) {
-      // if (dictLookup[target.path]?.ref?.current) {
-      //   const targetOriginX = useSharedValue(0);
-      //   const targetOriginY = useSharedValue(0);
-      //   // dictLookup[target.path]?.ref?.current.measure((x, y, width, height, pageX, pageY) => {
-      //   //   targetOriginX =
-      //   // });
-      // }
-      // const {x, y} = orign()
-      // connections[0].x1.value = originX.value;
-      // connections[0].y1.value = originY.value;
-      // connections[0].x2.value = event.absoluteX;
-      // connections[0].y2.value = event.absoluteY;
+  // }
+
+  const onHoverIn = (args) => {
+    "worklet";
+    const {
+      index,
+      event: { absoluteX, absoluteY },
+    } = args;
+    const { path, label, buttons: hasButtons } = buttons[index];
+
+    hoveredIndex.value = index;
+
+    //static
+    const hoveredDepth = path?.split(">").slice(1).length;
+
+    //dynamic
+    let activeDepth = activePath.value.split(">").slice(1).length;
+
+    const { top, left, height, width } = buttons[index];
+    const { x, y } = origin(top, left, height, width);
+
+    //if activeDepth === hoveredDept, handle silbings
+    if (activeDepth >= hoveredDepth) {
+      let update = buttons[index]?.path + `>${buttons[index].label}`;
+      activePath.value = update;
+      activeDepth = update.split(">").slice(1).length;
+    } else {
+      activePath.value = path + `>${label}`;
     }
+
+    connections.forEach((v, i) => {
+      // anyhthing below active depth, should remain the same
+      // anything AT active depth, should snap to hovered?
+      // anything above active depth is connected to drag
+      if (i <= Math.min(activeDepth, hoveredDepth)) {
+        return;
+      }
+      if (i > Math.min(activeDepth, hoveredDepth)) {
+        v.x1.value = x;
+        v.y1.value = y;
+        return;
+      }
+    });
   };
+
+  const gestureOriginX = useSharedValue(0);
+  const gestureOriginY = useSharedValue(0);
+
+  const pan = Gesture.Pan()
+    .runOnJS(true)
+    .minDistance(1)
+    .onBegin(
+      (event: GestureStateChangeEvent<PanGestureHandlerEventPayload>) => {
+        gestureOriginX.value = event.absoluteX;
+        gestureOriginY.value = event.absoluteY;
+        activePath.value = "";
+        // const { x, y } = origin(top, left, height, width);
+        connections.forEach((v) => {
+          v.x1.value = event.absoluteX;
+          v.y1.value = event.absoluteY;
+        });
+      }
+    )
+
+    .onUpdate((event) => {
+      const { velocityX, velocityY, absoluteX, absoluteY } = event;
+      //orchestrate line drag
+
+      // if (velocityX > 150 || velocityY > 150) return;
+
+      try {
+        buttons.forEach((button, index) => {
+          const { top, left, height, width } = button;
+          if (
+            overlapping({
+              top: top.value,
+              left: left.value,
+              width: width.value,
+              height: height.value,
+              mouseX: absoluteX,
+              mouseY: absoluteY,
+            })
+          ) {
+            throw index;
+          }
+        });
+        connections.forEach((v, i) => {
+          if (i > activePath.value.split(">").length - 1) {
+            v.x1.value = absoluteX;
+            v.y1.value = absoluteY;
+          }
+        });
+        hoveredIndex.value !== -1 && (hoveredIndex.value = -1);
+      } catch (index) {
+        onHoverIn({ index, event });
+      }
+    })
+    .onEnd((event) => {
+      return;
+      //snap back animated line
+      // const { x, y } = origin(top, left, height, width);
+      // const [cx, cy] = [connections[0].x1.value, connections[0].y1.value];
+
+      connections.forEach((v, i) => {
+        v.x1.value = withSpring(gestureOriginX.value);
+        v.y1.value = withSpring(gestureOriginY.value);
+        //   if (i > activePath.value.split(">").length) {
+        //     v.x1.value = withClamp(
+        //       { min: Math.min(cx, x), max: Math.max(cx, x) },
+        //       withSpring(x)
+        //     );
+        //     v.y1.value = withClamp(
+        //       { min: Math.min(cy, y), max: Math.max(cy, y) },
+        //       withSpring(y)
+        //     );
+        //   }
+      });
+      activePath.value = "";
+      // onEnd &&
+      //   onEnd({
+      //     event,
+      //     ...props,
+      //     ...common,
+      //   });
+    });
 
   return (
     <GestureHandlerRootView>
@@ -137,14 +255,11 @@ export default function ConstellationMenu() {
         maxNesting={maxNesting}
       />
       <View className="flex flex-1 justify-center items-center">
-        <View className="m-2">
-          <Text>Command Chain: {commandChain ? commandChain : "None"}</Text>
-        </View>
+        <GestureDetector gesture={pan}>{children}</GestureDetector>
         <View className=" flex flex-row gap-2 flex-wrap w-1/2 items-center justify-center">
           {buttons.map((v, i, a) => (
             <NumberSlot
               buttons={buttons}
-              connections={connections}
               index={i}
               key={i}
               ref={v.ref}
@@ -156,17 +271,17 @@ export default function ConstellationMenu() {
               onHoverOut={(args) => {
                 hoveredIndex.value = -1;
               }}
-              onStart={(args) => {}}
-              onUpdate={({ event }) => {}}
-              onEnd={({ event, index }) => {
-                if (hoveredIndex.value !== -1) {
-                  setCommandChain(
-                    buttons[hoveredIndex.value].path +
-                      `>${buttons[hoveredIndex.value].label}`
-                  );
-                  hoveredIndex.value = -1;
-                }
-              }}
+              // onStart={(args) => {}}
+              // onUpdate={({ event }) => {}}
+              // // onEnd={({ event, index }) => {
+              // //   if (hoveredIndex.value !== -1) {
+              // //     setCommandChain(
+              // //       buttons[hoveredIndex.value].path +
+              // //         `>${buttons[hoveredIndex.value].label}`
+              // //     );
+              // //     hoveredIndex.value = -1;
+              // //   }
+              // // }}
             />
           ))}
         </View>
