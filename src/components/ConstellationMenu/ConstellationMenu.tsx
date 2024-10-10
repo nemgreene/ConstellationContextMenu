@@ -39,32 +39,27 @@ import {
   HoverGestureChangeEventPayload,
   HoverGestureHandlerEventPayload,
 } from "react-native-gesture-handler/lib/typescript/handlers/gestures/hoverGesture";
-import { ObjectFlatten, origin, overlapping } from "@/app/utilities/math";
+import {
+  filterPath,
+  modifiers,
+  ObjectFlatten,
+  origin,
+  overlapping,
+  pathToArray,
+  pathWithoutPins,
+  rebindConnections,
+  removeIdFromPath,
+  safeId,
+  TerminalUpdate,
+} from "@/app/utilities/math";
 import { adaptViewConfig } from "react-native-reanimated/lib/typescript/ConfigHelper";
-import { ConnectionInterface } from "./types";
+import {
+  ConnectionInterface,
+  ConstellationButton,
+  FlattenedButton,
+} from "./types";
 import ConnectionHandler from "./ConnectionHandler";
 import NumberSlot from "./NumberSlots";
-
-interface CommonButtonProps {
-  label: string;
-  onClick?: () => void;
-  pin?: boolean;
-}
-
-interface ConstellationButton extends CommonButtonProps {
-  buttons?: any[];
-}
-
-interface FlattenedButton extends CommonButtonProps {
-  buttons?: any[];
-  path: string;
-  index: number;
-  top: SharedValue<number>;
-  left: SharedValue<number>;
-  height: SharedValue<number>;
-  width: SharedValue<number>;
-  ref: RefObject<any>;
-}
 
 const schema: ConstellationButton[] = [
   { label: "Button0" },
@@ -77,7 +72,7 @@ const schema: ConstellationButton[] = [
     ],
   },
   { label: "Button2 (Pin)", pin: true },
-  { label: "Button3" },
+  { label: "Button3 (Pin)", pin: true },
 ];
 
 export default function ConstellationMenu({ children }: PropsWithChildren) {
@@ -89,19 +84,23 @@ export default function ConstellationMenu({ children }: PropsWithChildren) {
       left: useSharedValue(0),
       height: useSharedValue(0),
       width: useSharedValue(0),
+      visible: useSharedValue(false),
       ref: React.createRef(),
     }))
   );
 
-  const maxNesting =
+  const longestPath =
     buttons.map((v) => v.path.split(">").length).sort((a, b) => b - a)[0] + 1 ||
     1;
+  const totalPins = buttons.reduce((acc, curr) => acc + (curr.pin ? 1 : 0), 0);
+
+  const maxConnections = longestPath + totalPins;
 
   //inverted chain of connections to draw
   //connection 0(x1, y1) is always bound to mouse
   //connection 0(x2, y2) bound to most recent chaining
   //all further connections are synamic
-  const connections: ConnectionInterface[] = new Array(maxNesting)
+  const connections: ConnectionInterface[] = new Array(maxConnections + 1)
     .fill("")
     .map((v, i) => ({
       index: i,
@@ -109,19 +108,16 @@ export default function ConstellationMenu({ children }: PropsWithChildren) {
       y1: useSharedValue(0),
     }));
 
-  // const dictLookup = buttons
-  //   .map((v, i) => ({ ...v, ref: refs[i] }))
-  //   .reduce((acc, curr) => ({ ...acc, [curr.path]: curr }), {});
+  const dictLookup: { [key: string]: FlattenedButton } = buttons
+    .map((v, i) => ({ ...v }))
+    .reduce((acc, curr) => ({ ...acc, [curr.id]: curr }), {});
 
-  const activePath: SharedValue<string> = useSharedValue("");
+  const lastHoveredIndex: SharedValue<number> = useSharedValue(-1);
+  const activePins: SharedValue<number> = useSharedValue(0);
+  const activePath: SharedValue<string> = useSharedValue("root");
   const hoveredIndex: SharedValue<number> = useSharedValue(
     Object.keys(buttons).length + 1
   );
-
-  // const filteredPath = (path: SharedValue<number> | string) => {
-  //   const ret = typeof path === "object" ? path.value : path
-
-  // }
 
   const onHoverIn = (args) => {
     "worklet";
@@ -129,54 +125,193 @@ export default function ConstellationMenu({ children }: PropsWithChildren) {
       index,
       event: { absoluteX, absoluteY },
     } = args;
-    const { path, label, buttons: hasButtons } = buttons[index];
+    const { path, pin, id } = buttons[index];
+    const pathArray = pathToArray(activePath.value);
+    try {
+      //If not new button, escape out
+      if (hoveredIndex.value === index) {
+        throw "Reject";
+      }
+      //if at max depth, do nothing
+      if (pathArray.length >= maxConnections) {
+        throw "Reject";
+      }
 
-    hoveredIndex.value = index;
+      //If button in the path
+      if (activePath.value.includes(id)) {
+        // if pinned, the button cannot be removed
+        if (pin) {
+          throw "Reject";
+        }
+        // else, pass to the catch to see if the id can be rmoved
+        throw "Remove";
+      }
 
-    //static
-    const hoveredDepth = path?.split(">").slice(1).length;
+      const newPath = activePath.value + `>${pin ? "$" : ""}${id}`;
 
-    //dynamic
-    let activeDepth = activePath.value.split(">").slice(1).length;
+      //Finally, handle adding new buttons to the chain
+      if (pathArray.length === 1) {
+        // at root
+        console.log("Flagging to update");
+        activePath.value = newPath;
+        console.log(activePath.value, newPath);
+        TerminalUpdate({
+          activePath,
+          buttons,
+          index,
+          connections,
+          absoluteX,
+          absoluteY,
+          hoveredIndex,
+        });
+        return;
+      }
 
-    const { top, left, height, width } = buttons[index];
-    const { x, y } = origin(top, left, height, width);
+      const lastButtonId = pathToArray(activePath).reverse()[0];
+      const { path: previousPath, pin: previousPin } =
+        dictLookup[safeId(lastButtonId)];
+      const previousDepth = pathToArray(pathWithoutPins(previousPath)).length;
 
-    //if activeDepth === hoveredDept, handle silbings
-    if (activeDepth >= hoveredDepth) {
-      let update = buttons[index]?.path + `>${buttons[index].label}`;
-      activePath.value = update;
-      activeDepth = update.split(">").slice(1).length;
-    } else {
-      activePath.value = path + `>${label}`;
+      const hoveredDepth = pathToArray(path).length;
+
+      //If button hovered is less shallow then previous, standard proceedure
+      if (previousDepth < hoveredDepth) {
+        activePath.value = newPath;
+        TerminalUpdate({
+          activePath,
+          buttons,
+          index,
+          connections,
+          absoluteX,
+          absoluteY,
+          hoveredIndex,
+        });
+        return;
+      }
+
+      //If these are siblings
+      if (previousDepth === hoveredDepth) {
+        // if either are pins, add to path
+        if (pin || previousPin) {
+          activePath.value = newPath;
+          TerminalUpdate({
+            activePath,
+            buttons,
+            index,
+            connections,
+            absoluteX,
+            absoluteY,
+            hoveredIndex,
+          });
+          return;
+        }
+        //else replace siblings in path
+        activePath.value = [...pathToArray(activePath).slice(0, -1), id].join(
+          ">"
+        );
+        hoveredIndex.value = index;
+        TerminalUpdate({
+          activePath,
+          buttons,
+          index,
+          connections,
+          absoluteX,
+          absoluteY,
+          hoveredIndex,
+        });
+        return;
+      }
+      //finally, if the hovered depth is more shallow
+      activePath.value = path;
+
+      throw "Reject";
+    } catch (execution) {
+      const pathArray = pathToArray(activePath);
+      let hoveredDepth = pathToArray(activePath).slice(1).length;
+
+      switch (execution) {
+        case "Reject":
+          connections.forEach((v, i) => {
+            if (i > hoveredDepth) {
+              v.x1.value = absoluteX;
+              v.y1.value = absoluteY;
+            }
+          });
+          break;
+        case "Remove":
+          //Verify if button can be rmoved from path
+          hoveredDepth = pathArray.slice(1).length;
+          const targetDepth = pathArray.indexOf(id);
+          // if id not in path (should be impossible)
+          //or a pin is present later in the chain of command
+          if (
+            targetDepth === -1 ||
+            pathArray.slice(targetDepth).join(">").includes("$")
+          ) {
+            connections.forEach((v, i) => {
+              if (i > hoveredDepth) {
+                v.x1.value = absoluteX;
+                v.y1.value = absoluteY;
+              }
+            });
+            break;
+          }
+          activePath.value = pathArray.slice(0, targetDepth).join(">");
+        // console.log("removing");
+        // filterPath(activePath, id);
+
+        case "Rebind":
+          console.log("rebinding");
+          //this case is never thrown, but may be hit after the Remove case
+          rebindConnections(
+            activePath,
+            dictLookup,
+            connections,
+            absoluteX,
+            absoluteY
+          );
+          console.log(activePath.value);
+          // hoveredIndex.value = index;
+          hoveredIndex.value = index;
+          break;
+        case "Update":
+          hoveredDepth = pathArray.slice(1).length;
+          console.log("Update", hoveredDepth, pathArray, activePath.value);
+          const { top, left, height, width } = buttons[index];
+          const { x, y } = origin(top, left, height, width);
+          connections.forEach((v, i) => {
+            // anyhthing below hovered depth, should remain the same
+            // anything AT hovered depth, should snap to hovered
+            // anything above hovered depth is connected to drag
+            if (i < hoveredDepth) {
+              return;
+            }
+            if (i === hoveredDepth) {
+              v.x1.value = x;
+              v.y1.value = y;
+              return;
+            } else {
+              v.x1.value = absoluteX;
+              v.y1.value = absoluteY;
+            }
+          });
+        default:
+          // console.log("Updating");
+          hoveredIndex.value = index;
+      }
     }
-
-    connections.forEach((v, i) => {
-      // anyhthing below active depth, should remain the same
-      // anything AT active depth, should snap to hovered?
-      // anything above active depth is connected to drag
-      if (i <= Math.min(activeDepth, hoveredDepth)) {
-        return;
-      }
-      if (i > Math.min(activeDepth, hoveredDepth)) {
-        v.x1.value = x;
-        v.y1.value = y;
-        return;
-      }
-    });
   };
 
   const gestureOriginX = useSharedValue(0);
   const gestureOriginY = useSharedValue(0);
 
   const pan = Gesture.Pan()
-    .runOnJS(true)
     .minDistance(1)
     .onBegin(
       (event: GestureStateChangeEvent<PanGestureHandlerEventPayload>) => {
         gestureOriginX.value = event.absoluteX;
         gestureOriginY.value = event.absoluteY;
-        activePath.value = "";
+        activePath.value = "root";
         // const { x, y } = origin(top, left, height, width);
         connections.forEach((v) => {
           v.x1.value = event.absoluteX;
@@ -186,14 +321,19 @@ export default function ConstellationMenu({ children }: PropsWithChildren) {
     )
 
     .onUpdate((event) => {
-      const { velocityX, velocityY, absoluteX, absoluteY } = event;
+      const { absoluteX, absoluteY } = event;
       //orchestrate line drag
 
       // if (velocityX > 150 || velocityY > 150) return;
 
       try {
         buttons.forEach((button, index) => {
-          const { top, left, height, width } = button;
+          const { top, left, height, width, visible, path } = button;
+          const vis = activePath.value.includes(pathToArray(path).reverse()[0]);
+          visible.value != vis && (visible.value = vis);
+          if (!vis) {
+            return;
+          }
           if (
             overlapping({
               top: top.value,
@@ -214,11 +354,14 @@ export default function ConstellationMenu({ children }: PropsWithChildren) {
           }
         });
         hoveredIndex.value !== -1 && (hoveredIndex.value = -1);
+        // lastHoveredIndex.value !== -1 && (lastHoveredIndex.value = -1);
       } catch (index) {
         onHoverIn({ index, event });
       }
     })
     .onEnd((event) => {
+      activePath.value = "root";
+      lastHoveredIndex.value = -1;
       return;
       //snap back animated line
       // const { x, y } = origin(top, left, height, width);
@@ -238,7 +381,6 @@ export default function ConstellationMenu({ children }: PropsWithChildren) {
         //     );
         //   }
       });
-      activePath.value = "";
       // onEnd &&
       //   onEnd({
       //     event,
@@ -249,11 +391,7 @@ export default function ConstellationMenu({ children }: PropsWithChildren) {
 
   return (
     <GestureHandlerRootView>
-      <ConnectionHandler
-        connections={connections}
-        activePath={activePath}
-        maxNesting={maxNesting}
-      />
+      <ConnectionHandler connections={connections} activePath={activePath} />
       <View className="flex flex-1 justify-center items-center">
         <GestureDetector gesture={pan}>{children}</GestureDetector>
         <View className=" flex flex-row gap-2 flex-wrap w-1/2 items-center justify-center">
@@ -264,9 +402,8 @@ export default function ConstellationMenu({ children }: PropsWithChildren) {
               key={i}
               ref={v.ref}
               activePath={activePath}
-              elementPath={v.path}
+              buttonData={v}
               hoveredIndex={hoveredIndex}
-              label={v.label && v.label.toString()}
               onHoverIn={onHoverIn}
               onHoverOut={(args) => {
                 hoveredIndex.value = -1;

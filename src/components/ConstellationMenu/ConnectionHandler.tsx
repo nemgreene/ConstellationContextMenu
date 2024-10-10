@@ -20,8 +20,7 @@ const Connection = ({ connection }) => {
   );
 };
 
-const ConnectionHandler = ({ connections, activePath, maxNesting }) => {
-  const parsedPath = activePath.value?.split(">").slice(1);
+const ConnectionHandler = ({ connections, activePath }) => {
   const polyLineStyle = useAnimatedProps(() => ({
     points: connections.map((v) => `${v.x1.value},${v.y1.value}`).join(" "),
   }));

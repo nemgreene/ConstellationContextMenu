@@ -38,9 +38,14 @@ import {
   HoverGestureChangeEventPayload,
   HoverGestureHandlerEventPayload,
 } from "react-native-gesture-handler/lib/typescript/handlers/gestures/hoverGesture";
-import { origin, overlapping } from "@/app/utilities/math";
+import {
+  origin,
+  overlapping,
+  pathToArray,
+  pathWithoutPins,
+} from "@/app/utilities/math";
 import { adaptViewConfig } from "react-native-reanimated/lib/typescript/ConfigHelper";
-import { ConnectionInterface } from "./types";
+import { ConnectionInterface, FlattenedButton } from "./types";
 import { GestureDetectorBridge } from "react-native-screens";
 
 type InjectionContext = {
@@ -49,18 +54,21 @@ type InjectionContext = {
     | GestureHandlerEvent<PanGestureHandlerEventPayload>
     | GestureHandlerEvent<HoverGestureHandlerEventPayload>;
   activePath: SharedValue<string>;
-  active: boolean;
-  setActive: Dispatch<SetStateAction<boolean>>;
-  elementPath: string;
+  // active: boolean;
+  // setActive: Dispatch<SetStateAction<boolean>>;
+  top: number;
+  left: number;
+  height: number;
+  width: number;
+  buttonData: FlattenedButton;
 } & NumberSlotProps;
 
 interface NumberSlotProps {
   activePath: SharedValue<string>;
   buttons: any[];
-  elementPath: string;
+  buttonData: FlattenedButton;
   hoveredIndex: SharedValue<number>;
   index: number;
-  label: string;
   onHoverIn?: (args: InjectionContext) => void;
   onHoverOut?: (args: InjectionContext) => void;
 }
@@ -70,23 +78,23 @@ const NumberSlot = React.forwardRef(
     const {
       activePath,
       buttons,
-      elementPath,
+      buttonData,
       hoveredIndex,
       index,
-      label,
       onHoverIn,
       onHoverOut,
     } = props;
     const [active, setActive] = useState<boolean>(false);
 
     const { top, left, height, width } = buttons[index];
+    const { id, path: elementPath, label } = buttonData;
 
     //Offset between where drag begins and the center of the element
 
     const common = {
-      active,
-      setActive,
-      elementPath,
+      // active,
+      // setActive,
+      buttonData,
       activePath,
       top,
       left,
@@ -125,7 +133,10 @@ const NumberSlot = React.forwardRef(
       borderColor: hoveredIndex.value === index ? "red" : "rgb(3 105 161)",
       borderWidth: 2,
       borderStyle: "solid",
-      opacity: activePath.value.includes(elementPath) ? 1 : 0.5,
+      backgroundColor: activePath.value.includes(id) ? "red" : "rgb(3 105 161)",
+      opacity: activePath.value.includes(pathToArray(elementPath).reverse()[0])
+        ? 1
+        : 0.1,
     }));
 
     return (
