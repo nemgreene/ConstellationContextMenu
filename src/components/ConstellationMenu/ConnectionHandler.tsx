@@ -1,26 +1,12 @@
 import { View, Text, StyleSheet } from "react-native";
-import React from "react";
+import React, { useContext } from "react";
 import Svg, { Defs, LinearGradient, Polyline, Stop } from "react-native-svg";
 import { AnimatedLine, AnimatedPolyLine } from "../AnimatedComponents";
 import { useAnimatedProps } from "react-native-reanimated";
+import { ConstellationContext } from "@/app/utilities/math";
 
-const Connection = ({ connection }) => {
-  const animatedProps = useAnimatedProps(() => ({
-    x1: connection.x1.value,
-    y1: connection.y1.value,
-    x2: connection.x2.value,
-    y2: connection.y2.value,
-  }));
-  return (
-    <AnimatedLine
-      animatedProps={animatedProps}
-      stroke={"url(#grad1)"}
-      strokeWidth={"2px"}
-    />
-  );
-};
-
-const ConnectionHandler = ({ connections, activePath }) => {
+const ConnectionHandler = () => {
+  const { connections } = useContext(ConstellationContext);
   const polyLineStyle = useAnimatedProps(() => ({
     points: connections.map((v) => `${v.x1.value},${v.y1.value}`).join(" "),
   }));
